@@ -21,6 +21,7 @@ from pylab import polyfit
 import numpy as np
 from operator import itemgetter
 from math import log
+import scipy.optimize as opt
 
 _INFINITY = float ('inf')
 
@@ -961,6 +962,27 @@ class Regions(object):
             
         for region in self._regions:
             region.replot()
+
+    def optimize_region_boundaries(self):
+        """ Adjust and optimize boundaries dividing regions
+            based on the distance between the fit function
+            of each region at the region boundary
+        """
+
+        #For i in len(self._regions)
+            #While continuing to optimize:
+                #Optimize absolute value of Region1 fit - Region2 fit at boundary. HINT: opt.minimize_scalar(lambda x:abs(self._regions[i]
+
+                #If optimized x-value moves the boundary across a data point:
+                    #Check that moving data point won't leave a region with less than 2 data points or the number of ghost points
+
+                    #Move crossed data point out of old region into new region.
+
+                    #Update ghost points
+
+                    #Recalculate fit curves for each region
+
+            #Set new boundary to the newly-found optimized x-value
 
     def write_output_files(self):
         data_sets = self._get_data_sets()
