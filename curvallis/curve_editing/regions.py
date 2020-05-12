@@ -20,8 +20,8 @@ import smoothers
 from pylab import polyfit
 import numpy as np
 from operator import itemgetter
-from math import log
 import scipy.optimize as opt
+from math import log10
 
 _INFINITY = float ('inf')
 
@@ -31,28 +31,34 @@ def define_args(parser):
     parser.add_argument(
         '--do_derivative',
         action='store_true',
-        help='Calculate and plot the derivative of the fit function '
+        help='Calculate and plot the derivative of the fit function. '
              '[default: %(default)s]')
     parser.add_argument(
         '--do_integral',
         action='store_true',
-        help='Calculate and plot the integral of the fit function '
+        help='Calculate and plot the integral of the fit function. '
              '[default: %(default)s]')
     parser.add_argument(
-        '--points_in_fit_curve', action='store', type=int,
-        help='Calculate this many points in the fit curve when writing the '
-             'curve to a file [default: %(default)s]', metavar='<count>')
+        '--points_per_decade', action='store', type=int,
+        help='Calculate this many points per logarithmic decade in the fit curve '
+             'when writing the curve to a file [default: %(default)s]', metavar='<count>')
     parser.add_argument(
         '--points_in_user_curve', action='store', type=int,
         help='Calculate this many points in the user inputted curves when writing the '
-             'curves to a file [default: %(default)s]', metavar='<count>')
+             'curves to a file. [default: %(default)s]', metavar='<count>')
     parser.add_argument(
         '--region_bound',
         action='append',
         nargs='+', type=float,
-        help='Select where region boundaries are supposed to go in sequential order'
-             '[default: Evenly Spaced]',
+        help='Select where region boundaries are supposed to go in sequential order '
+             'based on x-values. [default: Evenly Spaced]',
         metavar='<bound>')
+    parser.add_argument(
+        '--region_data_points',
+        type=int,
+        help='Select number of data points each region should have. '
+             '[default: %(default)s]',
+        metavar='<int>')
     parser.add_argument(
         '--overlap',
         type=int,
@@ -62,37 +68,37 @@ def define_args(parser):
     parser.add_argument(
         '--numpoints',
         type=int,
-        help='Select the number of points for the local average trilocal smoothing.'
+        help='Select the number of points for the local average trilocal smoothing. '
              '[default: %(default)s]',
         metavar='<int>')
     parser.add_argument(
         '--repeat',
         type=int,
-        help='Select the number of times to repeat trilocal smoothing.'
+        help='Select the number of times to repeat trilocal smoothing. '
              '[default: %(default)s]',
         metavar='<int>')
     parser.add_argument(
         '--matchpt',
         type=float,
-        help='Select the matchpoint for integral and tri-integral smoothing.'
+        help='Select the matchpoint for integral and tri-integral smoothing. '
              '[default: %(default)s]',
         metavar='<float>')
     parser.add_argument(
         '--interp',
-        help='Select the interpolator for integral and tri-integral smoothing.'
+        help='Select the interpolator for integral and tri-integral smoothing. '
              '[default: %(default)s]',
         metavar='<arg>')
     parser.add_argument(
         '--angle',
         type=int,
-        help='Select the angle for acute angle repair.'
+        help='Select the angle for acute angle repair. '
              '[default: %(default)s]',
         metavar='<int>')
 
     parser.set_defaults(
         do_derivative=False,
         do_integral=False,
-        points_in_fit_curve=100,
+        points_per_decade=220,
         points_in_user_curve=100,
         polynomial_order=5,
         overlap=2,
@@ -136,8 +142,8 @@ class _Line_Set_With_Fit(lines.Line_Set):
         :return: list
         """
         if self._logscale == True:
-            x_first = log(x_first,10)
-            x_last = log(x_last,10)
+            x_first = log10(x_first)
+            x_last = log10(x_last)
 
         result = []
         x_range = x_last - x_first
@@ -264,10 +270,13 @@ class _Line_Set_With_Fit(lines.Line_Set):
             else:
                 self._x_view_high_limit = self._x_high_limit
 
+            #Find logarithmic decades covered by new x-scale in view
+            decades_covered = log10(self._x_view_high_limit / self._x_view_low_limit)
+
             fit_points = self.calc_fit_points_for_range(
                 x_first=self._x_view_low_limit,
                 x_last=self._x_view_high_limit,
-                point_count=self._args.points_in_fit_curve)
+                point_count=int(decades_covered * self._args.points_per_decade))
 
             # Need animated = True for curve plots to get the last curve to go away:
             if self.fit_curve._id == None:
@@ -279,14 +288,14 @@ class _Line_Set_With_Fit(lines.Line_Set):
                 derivative_points = self._calc_derivative_points_for_range(
                     x_first=self._x_low_limit,
                     x_last=self._x_high_limit,
-                    point_count=self._args.points_in_fit_curve)
+                    point_count=int(decades_covered * self._args.points_per_decade))
                 self.derivative_curve.plot_xy_data(derivative_points,
                                                    animated=True)
             if self._args.do_integral:
                 integral_points = self._calc_integral_points_for_range(
                     x_first=self._x_low_limit,
                     x_last=self._x_high_limit,
-                    point_count=self._args.points_in_fit_curve)
+                    point_count=int(decades_covered * self._args.points_per_decade))
                 self.integral_curve.plot_xy_data(integral_points,
                                                  animated=True)
 
@@ -382,17 +391,6 @@ class _Line_Sets(object):
         :return: Line_Set
         """
         return self._sets.values()[0]
-
-    def get_fit_curve_points(self):
-        """ Return the line set's ONLY fit curve's points.
-        """
-        line_set = self._get_only_line_set()
-        # The current fit curve data is custom-generated for the current zoom's .
-        # x range. Calculate the curve for the the movable line's full x range:
-        return line_set.calc_fit_points_for_range(
-            x_first=self._x_low_limit,
-            x_last=self._x_high_limit,
-            point_count=self._args.points_in_fit_curve)
 
     def get_info(self, indent=''):
         result  = indent + 'Line sets count: %s\n' % len(self._sets)
@@ -642,11 +640,6 @@ class _Region(object):
     def draw(self):
         self._line_sets.draw()
 
-    def get_fit_curve_points(self):
-        """ Return the region's ONLY fit curve's points.
-        """
-        return self._line_sets.get_fit_curve_points()
-
     def plot_curves(self):
         self._line_sets.plot_curves()
 
@@ -825,20 +818,37 @@ class Regions(object):
             return result
 
         def input_x_boundaries():
-            # Check boundaries were entered in ascending order
-            assert ascending(self._args.region_bound[0]), "Region boundaries must be entered in ascending order."
+            #Check to see if user wants region boundaries by number of data points or by x-values
+            if self._args.region_data_points != None:
+                #Create as many regions as possible that contain the amount of data points as the user gave
+                # in the Command Line argument 'region_data_points'
+                data = next(self._data_sets.iteritems())[1]
 
-            result = [_INFINITY for unused in range(region_count + 1)]
-            result[0] = self._x_min
-            result[-1] = self._x_max
-            for i in range(1, region_count):
-                result[i] = float(self._args.region_bound[0][i-1])
-                assert self._x_min < result[i] < self._x_max, "Region boundaries are not in range of the data. (%E to %E)" % (self._x_min, self._x_max)
+                assert len(data) >= self._args.region_data_points, "%E points wanted per region but an insufficient number of data points, %E, has been given" % (self._args.region_data_points, len(data))
 
-            return result
+                reg_count = int(len(data)/self._args.region_data_points)
+                result = [_INFINITY for unused in range(reg_count+1)]
+                result[0] = self._x_min
+                result[-1] = self._x_max
+                #Make equal-sized regions that have 'self._args.region_data_points' many data points in them
+                for i in range(1, reg_count):
+                    if len(data) > int(i*self._args.region_data_points+1):
+                        result[i] = float((data[i*self._args.region_data_points][0]+data[i*self._args.region_data_points+1][0])/2)
+            else:
+                # Check boundaries were entered in ascending order
+                assert ascending(self._args.region_bound[0]), "Region boundaries must be entered in ascending order."
+                #Use the user-given numbers as the x-values for region boundaries
+                reg_count = region_count
+                result = [_INFINITY for unused in range(region_count + 1)]
+                result[0] = self._x_min
+                result[-1] = self._x_max
+                for i in range(1, region_count):
+                    result[i] = float(self._args.region_bound[0][i-1])
+                    assert self._x_min < result[i] < self._x_max, "Region boundaries are not in range of the data. (%E to %E)" % (self._x_min, self._x_max)
+            return result, reg_count
 
-        if self._args.region_bound != None:
-            x_boundaries = input_x_boundaries()
+        if self._args.region_bound != None or self._args.region_data_points != None:
+            x_boundaries, region_count = input_x_boundaries()
         else:
             x_boundaries = calculate_x_boundaries()
         self._plot_lowest_boundary_line(x_boundaries[0])
@@ -878,14 +888,42 @@ class Regions(object):
             region.draw()
 
     def _get_fit_curve_points(self):
-        """ Return a list of all the regions' ONLY fit curve points, concatenated.
+        """ Return a list of ONLY fit curve points on a logarithmic scale, concatenated across the entire data range.
         """
         assert not self._is_eos_data
-        points=[]
-        for region in self._regions:
-            points.extend(region.get_fit_curve_points())
 
-        return points
+        x_first = log10(self._x_min)
+        x_last = log10(self._x_max)
+
+        #Find how many points will be needed by finding the number of decades * points per decade
+        num_points = int((x_last - x_first) * self._args.points_per_decade)
+
+        x_values = []
+        x_range = x_last - x_first
+        for i in range(num_points):
+            # Calculate each x without any cumulative errors:
+            portion = float(i) / float(num_points-1)
+            x = x_first + (portion * x_range)
+
+            x_values.append(pow(10,x))
+
+        #Calculate y-values for each x-value
+        y_values = []
+        current_region_index = 0
+        only_line_set = self._regions[current_region_index]._line_sets._get_only_line_set()
+
+        for x in x_values:
+            #Check that we're in the right region for this x-value
+            if self._regions[current_region_index].get_x_high_limit() < x:
+                current_region_index += 1
+                only_line_set = self._regions[current_region_index]._line_sets._get_only_line_set()
+            #Change the y-value based on the presence of _fitter2
+            if (only_line_set._fitter2 == 'none'):
+                y_values.append(only_line_set._fitter.func(x))
+            else:
+                y_values.append(only_line_set._fitter.func(x) - only_line_set._fitter2.func(x))
+
+        return zip(x_values, y_values)
 
     def _get_data_sets(self):
         """ Get the data sets from every region, glue them back together as if
